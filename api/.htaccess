@@ -1,0 +1,6 @@
+RewriteEngine On
+
+# Send API routes such as /api/auth/login to the PHP controller while allowing
+# the controller itself to be served normally.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ index.php [L,QSA]

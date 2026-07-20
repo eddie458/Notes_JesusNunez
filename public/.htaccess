@@ -1,0 +1,10 @@
+RewriteEngine On
+
+# Let the PHP API and real static files/directories pass through unchanged.
+RewriteRule ^api(?:/|$) - [L]
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Send client-side routes such as /admin/ to the Vite application.
+RewriteRule ^ index.html [L]
