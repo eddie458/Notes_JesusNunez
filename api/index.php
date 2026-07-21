@@ -106,14 +106,14 @@ function requireAdmin(PDO $db): array {
 
 function sanitizeHtml(string $html): string {
   if (!class_exists('DOMDocument')) {
-    return strip_tags($html, '<p><br><strong><em><u><span><ul><ol><li><pre><code>');
+    return strip_tags($html, '<p><br><strong><em><u><s><span><ul><ol><li><pre><code>');
   }
   $doc = new DOMDocument();
   libxml_use_internal_errors(true);
   // DOMDocument assumes ISO-8859-1 unless an encoding is declared. The XML
   // declaration makes it preserve UTF-8 punctuation, accents, and emoji.
   $doc->loadHTML('<?xml encoding="UTF-8"><div>' . $html . '</div>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-  $allowed = ['p', 'br', 'strong', 'em', 'u', 'span', 'ul', 'ol', 'li', 'pre', 'code', 'div', 'blockquote', 'label', 'input', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'colgroup', 'col'];
+  $allowed = ['p', 'br', 'strong', 'em', 'u', 's', 'span', 'ul', 'ol', 'li', 'pre', 'code', 'div', 'blockquote', 'label', 'input', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'colgroup', 'col'];
   $walker = function (DOMNode $node) use (&$walker, $allowed): void {
     foreach (iterator_to_array($node->childNodes) as $child) {
       if ($child instanceof DOMElement && !in_array(strtolower($child->tagName), $allowed, true)) {
@@ -137,16 +137,28 @@ function sanitizeHtml(string $html): string {
             || ($tag === 'input' && $name === 'checked');
           $isSafeTableAttribute = (in_array($tag, ['td', 'th'], true) && in_array($name, ['colspan', 'rowspan'], true)
               && ctype_digit($value) && (int)$value >= 1 && (int)$value <= 100)
+            || (in_array($tag, ['td', 'th'], true) && $name === 'colwidth'
+              && preg_match('/^\d+(?:,\d+)*$/', $value)
+              && count(array_filter(explode(',', $value), fn($width) => (int)$width < 1 || (int)$width > 600)) === 0)
             || ($tag === 'col' && $name === 'width' && ctype_digit($value) && (int)$value >= 1 && (int)$value <= 5000);
-          if (!(($tag === 'span' && $name === 'style') || $isSafeTaskAttribute || $isSafeTableAttribute)) $child->removeAttributeNode($attribute);
+          $isSafeTableStyle = (in_array($tag, ['td', 'th', 'col'], true) && $name === 'style');
+          if (!(($tag === 'span' && $name === 'style') || $isSafeTaskAttribute || $isSafeTableAttribute || $isSafeTableStyle)) $child->removeAttributeNode($attribute);
         }
         if ($child->hasAttribute('style')) {
           $style = $child->getAttribute('style');
           // Browsers commonly serialize the palette's hex colors as rgb(...).
           // Permit only numeric RGB/RGBA values alongside the existing safe
           // color, font-size, and font-family formats.
-          $safe = preg_match_all('/(?:color|font-size|font-family)\s*:\s*(?:#[0-9a-fA-F]{3,8}|rgba?\(\s*[0-9.% ,\/]+\s*\)|[a-zA-Z0-9 ,.-]+)(?:\s*;|$)/', $style, $matches)
-            ? implode(';', $matches[0]) : '';
+          if ($tag === 'span') {
+            $safe = preg_match_all('/(?:color|font-size|font-family)\s*:\s*(?:#[0-9a-fA-F]{3,8}|rgba?\(\s*[0-9.% ,\/]+\s*\)|[a-zA-Z0-9 ,.-]+)(?:\s*;|$)/', $style, $matches)
+              ? implode(';', $matches[0]) : '';
+          } elseif (in_array($tag, ['td', 'th'], true) && preg_match('/^\s*height\s*:\s*(\d{1,3})px\s*;?\s*$/i', $style, $matches) && (int)$matches[1] >= 32 && (int)$matches[1] <= 400) {
+            $safe = 'height: ' . (int)$matches[1] . 'px';
+          } elseif ($tag === 'col' && preg_match('/^\s*(?:min-)?width\s*:\s*(\d{1,4})px\s*;?\s*$/i', $style, $matches) && (int)$matches[1] >= 1 && (int)$matches[1] <= 5000) {
+            $safe = strtolower(str_contains(strtolower($style), 'min-width') ? 'min-width' : 'width') . ': ' . (int)$matches[1] . 'px';
+          } else {
+            $safe = '';
+          }
           $safe ? $child->setAttribute('style', $safe) : $child->removeAttribute('style');
         }
       }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import DOMPurify from 'dompurify'
-import { EditorContent, useEditor } from '@tiptap/react'
+import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Color from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
@@ -9,15 +9,36 @@ import FontFamily from '@tiptap/extension-font-family'
 import UnderlineExtension from '@tiptap/extension-underline'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
+import { findTable, TableMap } from '@tiptap/pm/tables'
 import {
-  Archive, ArchiveRestore, Bold, Check, ChevronDown, Code2, FileText, Grid2X2, Italic,
+  Archive, ArchiveRestore, Bold, Check, ChevronDown, Code2, Eraser, FileText, Grid2X2, Italic,
   LayoutList, ListChecks, LogOut, MoreHorizontal, Palette, Pencil, Pin, Plus, Quote, Search, Shield,
-  Table2, Trash2, Underline, UserPlus, Users, X,
+  Strikethrough, Table2, TextCursorInput, Trash2, Type, Underline, UserPlus, Users, X,
 } from 'lucide-react'
 import { adminApi, authApi, categoriesApi, notesApi } from './api'
 import './styles.css'
 
-const COLORS = ['#fffdf7', '#fff0b8', '#dff5e5', '#ddecff', '#eee5ff', '#ffe2e7']
+const NOTE_COLORS = [
+  { name: 'Paper', value: '#fffdf7' },
+  { name: 'Butter', value: '#fff0b8' },
+  { name: 'Mint', value: '#dff5e5' },
+  { name: 'Sky', value: '#ddecff' },
+  { name: 'Lavender', value: '#eee5ff' },
+  { name: 'Blush', value: '#ffe2e7' },
+  { name: 'Peach', value: '#ffe4cc' },
+  { name: 'Tangerine cream', value: '#ffedcf' },
+  { name: 'Lemonade', value: '#fff7bd' },
+  { name: 'Pistachio', value: '#e7f3c8' },
+  { name: 'Seafoam', value: '#ccefe2' },
+  { name: 'Aqua', value: '#d4f4f3' },
+  { name: 'Blueberry', value: '#d8e6ff' },
+  { name: 'Lilac', value: '#e7ddff' },
+  { name: 'Cotton candy', value: '#ffdbe8' },
+  { name: 'Rose', value: '#ffd9d5' },
+  { name: 'Cloud', value: '#edf0f6' },
+  { name: 'Pebble', value: '#e9e5dd' },
+]
+const COLORS = NOTE_COLORS.map(color => color.value)
 const TEXT_COLORS = [
   { name: 'Ink', value: '#252525' },
   { name: 'Slate', value: '#68645e' },
@@ -34,6 +55,18 @@ const TEXT_COLORS = [
   { name: 'Grape', value: '#9b51cf' },
   { name: 'Fuchsia', value: '#d84eaa' },
 ]
+const FONT_OPTIONS = [
+  { label: 'Default', value: null },
+  { label: 'Sans', value: 'Inter' },
+  { label: 'Serif', value: 'Georgia' },
+  { label: 'Mono', value: 'monospace' },
+]
+const SIZE_OPTIONS = [
+  { label: 'Default', value: null },
+  { label: 'Small', value: '14px' },
+  { label: 'Medium', value: '16px' },
+  { label: 'Large', value: '20px' },
+]
 
 const FontSize = TextStyle.extend({
   addAttributes() {
@@ -42,6 +75,43 @@ const FontSize = TextStyle.extend({
         default: null,
         parseHTML: element => element.style.fontSize,
         renderHTML: attributes => attributes.fontSize ? { style: `font-size: ${attributes.fontSize}` } : {},
+      },
+    }
+  },
+})
+
+function tableRowHeight(value) {
+  const height = Number.parseInt(String(value), 10)
+  return Number.isInteger(height) && height >= 32 && height <= 400 ? height : null
+}
+
+const SizedTableCell = TableCell.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      rowHeight: {
+        default: null,
+        parseHTML: element => tableRowHeight(element.style.height),
+        renderHTML: attributes => {
+          const height = tableRowHeight(attributes.rowHeight)
+          return height ? { style: `height: ${height}px` } : {}
+        },
+      },
+    }
+  },
+})
+
+const SizedTableHeader = TableHeader.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      rowHeight: {
+        default: null,
+        parseHTML: element => tableRowHeight(element.style.height),
+        renderHTML: attributes => {
+          const height = tableRowHeight(attributes.rowHeight)
+          return height ? { style: `height: ${height}px` } : {}
+        },
       },
     }
   },
@@ -232,8 +302,9 @@ function NotesApp({ user, onLogout }) {
 
       <div className="px-4 py-7 md:px-10 md:py-9">
         <div className="mb-5 flex items-center justify-between lg:hidden"><div className="text-sm text-[#77736c]">{user.display_name}</div><div className="flex gap-1">{user.is_admin && <a href="/admin/" className="mobile-account-button" title="Administration"><Shield size={16}/></a>}<button onClick={onLogout} className="mobile-account-button" title="Sign out"><LogOut size={16}/></button></div></div>
+        <section className="mb-5 lg:hidden" aria-label="Categories"><div className="mb-2 flex items-center justify-between"><span className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#989792]">Categories</span><button type="button" onClick={addCategory} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-[#5e5a54] hover:bg-[#efede8]"><Plus size={15}/> New</button></div><div className="flex gap-2 overflow-x-auto pb-1"><button type="button" aria-pressed={selectedView === 'all'} onClick={() => setSelectedView('all')} className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${selectedView === 'all' ? 'border-[#282828] bg-[#282828] text-white' : 'border-[#dedbd4] bg-white text-[#69655e]'}`}>All notes</button>{categories.map(category => <button key={category.id} type="button" aria-pressed={String(selectedView) === String(category.id)} onClick={() => setSelectedView(category.id)} className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${String(selectedView) === String(category.id) ? 'border-[#282828] bg-[#282828] text-white' : 'border-[#dedbd4] bg-white text-[#69655e]'}`}>{category.name}</button>)}{!categories.length && <span className="self-center text-xs text-[#938f87]">No categories yet</span>}</div></section>
         {error && <div className="error-banner mb-5" role="alert">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}
-        <div className="mb-7 flex items-center justify-between"><p className="text-sm text-[#86837d]">{loading ? 'Loading notes…' : `${visibleNotes.length} ${visibleNotes.length === 1 ? 'note' : 'notes'}`}</p><label className="flex items-center gap-2 text-sm text-[#88847e] md:hidden"><Search size={16}/><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search" className="w-24 bg-transparent outline-none"/></label></div>
+        <div className="mb-7 flex items-center justify-between"><p className="text-sm text-[#86837d]">{loading ? 'Loading notes…' : `${visibleNotes.length} ${visibleNotes.length === 1 ? 'note' : 'notes'}`}</p><label className="mobile-search-field md:hidden"><Search size={16}/><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search"/></label></div>
         {!loading && pinned.length > 0 && <section className="mb-10"><h2 className="section-heading"><Pin size={13} fill="currentColor"/> Pinned</h2><NoteCollection notes={pinned} listClass={listClass} categories={categories} onEdit={setEditing} onPin={togglePin} onArchive={toggleArchive} onDelete={deleteNote} menu={menu} setMenu={setMenu}/></section>}
         {!loading && <section><h2 className="section-heading">{selectedView === 'archive' ? 'Archived notes' : pinned.length ? 'Others' : 'Notes'}</h2>{regular.length ? <NoteCollection notes={regular} listClass={listClass} categories={categories} onEdit={setEditing} onPin={togglePin} onArchive={toggleArchive} onDelete={deleteNote} menu={menu} setMenu={setMenu}/> : <div className="empty-state">{selectedView === 'archive' ? 'Your archive is empty.' : 'Nothing here yet. Make room for a new thought.'}</div>}</section>}
       </div>
@@ -268,11 +339,27 @@ function NoteCard({ note, category, onEdit, onPin, onArchive, onDelete, menu, se
 function NoteEditor({ note, categories, onClose, onSave }) {
   const [draft, setDraft] = useState(note)
   const [saving, setSaving] = useState(false)
+  const [noteColorMenuOpen, setNoteColorMenuOpen] = useState(false)
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false)
   const [colorMenuOpen, setColorMenuOpen] = useState(false)
+  const [fontMenuOpen, setFontMenuOpen] = useState(false)
+  const [sizeMenuOpen, setSizeMenuOpen] = useState(false)
   const [tableMenuOpen, setTableMenuOpen] = useState(false)
   const [tableRows, setTableRows] = useState(3)
   const [tableColumns, setTableColumns] = useState(3)
-  const editor = useEditor({ extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Table.configure({ resizable: false }), TableRow, TableHeader, TableCell, TextStyle, FontSize, Color, FontFamily, UnderlineExtension], content: note.content, editorProps: { attributes: { class: 'editor-prose' } }, onUpdate: ({ editor: activeEditor }) => setDraft(value => ({ ...value, content: activeEditor.getHTML() })) })
+  const [tableColumnWidth, setTableColumnWidth] = useState(160)
+  const [tableRowHeight, setTableRowHeight] = useState(56)
+  const editor = useEditor({ extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Table.configure({ resizable: true, cellMinWidth: 84 }), TableRow, SizedTableHeader, SizedTableCell, TextStyle, FontSize, Color, FontFamily, UnderlineExtension], content: note.content, editorProps: { attributes: { class: 'editor-prose' } }, onUpdate: ({ editor: activeEditor }) => setDraft(value => ({ ...value, content: activeEditor.getHTML() })) })
+  const formatting = useEditorState({
+    editor,
+    selector: ({ editor: activeEditor }) => ({
+      bold: activeEditor.isActive('bold'),
+      italic: activeEditor.isActive('italic'),
+      underline: activeEditor.isActive('underline'),
+      strike: activeEditor.isActive('strike'),
+      inTable: activeEditor.isActive('table'),
+    }),
+  })
   useEffect(() => () => editor?.destroy(), [editor])
   if (!editor) return null
   const command = fn => () => fn().run()
@@ -285,9 +372,10 @@ function NoteEditor({ note, categories, onClose, onSave }) {
     if (!hasSelection) chain = chain.setTextSelection(from)
     return chain.run()
   }
-  const button = (label, icon, action, active) => <button type="button" aria-label={label} title={label} onMouseDown={event => event.preventDefault()} onClick={action} className={`format-button ${active ? 'active' : ''}`}>{icon}</button>
+  const button = (label, icon, action, active, extraClass = '') => <button type="button" aria-label={label} title={label} onMouseDown={event => event.preventDefault()} onClick={action} className={`format-button ${active ? 'active' : ''} ${extraClass}`}>{icon}</button>
   async function submit() { setSaving(true); const saved = await onSave(draft); if (!saved) setSaving(false) }
   function tableDimension(value) { return Math.min(12, Math.max(1, Number.parseInt(value, 10) || 1)) }
+  function tablePixels(value, minimum, maximum) { return Math.min(maximum, Math.max(minimum, Number.parseInt(value, 10) || minimum)) }
   function insertTable() {
     editor.chain().focus().insertTable({ rows: tableDimension(tableRows), cols: tableDimension(tableColumns), withHeaderRow: true }).run()
     setTableMenuOpen(false)
@@ -296,7 +384,66 @@ function NoteEditor({ note, categories, onClose, onSave }) {
     if (editor.can()[action]()) editor.chain().focus()[action]().run()
     setTableMenuOpen(false)
   }
-  const tableActions = editor.isActive('table') ? [
+  function getCurrentTableCell() {
+    const table = findTable(editor.state.selection)
+    if (!table) return null
+    const map = TableMap.get(table.node)
+    const selection = editor.state.selection
+    let cellPosition = selection.$anchorCell?.pos
+    if (cellPosition === undefined) {
+      for (let depth = selection.$from.depth; depth > 0; depth -= 1) {
+        const node = selection.$from.node(depth)
+        if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+          cellPosition = selection.$from.before(depth)
+          break
+        }
+      }
+    }
+    if (cellPosition === undefined) return null
+    const relativePosition = cellPosition - table.start
+    return { table, map, rect: map.findCell(relativePosition) }
+  }
+  function setCurrentColumnWidth() {
+    const context = getCurrentTableCell()
+    if (!context) return
+    const width = tablePixels(tableColumnWidth, 84, 600)
+    setTableColumnWidth(width)
+    const { table, map, rect } = context
+    const transaction = editor.state.tr
+    const seenCells = new Set()
+    for (let row = 0; row < map.height; row += 1) {
+      const cellPosition = map.map[row * map.width + rect.left]
+      if (seenCells.has(cellPosition)) continue
+      seenCells.add(cellPosition)
+      const cell = transaction.doc.nodeAt(table.start + cellPosition)
+      if (!cell) continue
+      const cellRect = map.findCell(cellPosition)
+      const colwidth = Array.from({ length: cell.attrs.colspan }, (_, index) => cell.attrs.colwidth?.[index] || 0)
+      colwidth[rect.left - cellRect.left] = width
+      transaction.setNodeMarkup(table.start + cellPosition, undefined, { ...cell.attrs, colwidth })
+    }
+    editor.view.dispatch(transaction)
+    setTableMenuOpen(false)
+  }
+  function setCurrentRowHeight() {
+    const context = getCurrentTableCell()
+    if (!context) return
+    const height = tablePixels(tableRowHeight, 32, 400)
+    setTableRowHeight(height)
+    const { table, map, rect } = context
+    const transaction = editor.state.tr
+    const seenCells = new Set()
+    for (let column = 0; column < map.width; column += 1) {
+      const cellPosition = map.map[rect.top * map.width + column]
+      if (seenCells.has(cellPosition)) continue
+      seenCells.add(cellPosition)
+      const cell = transaction.doc.nodeAt(table.start + cellPosition)
+      if (cell) transaction.setNodeMarkup(table.start + cellPosition, undefined, { ...cell.attrs, rowHeight: height })
+    }
+    editor.view.dispatch(transaction)
+    setTableMenuOpen(false)
+  }
+  const tableActions = formatting?.inTable ? [
     { label: 'Add row above', action: 'addRowBefore' },
     { label: 'Add row below', action: 'addRowAfter' },
     { label: 'Remove row', action: 'deleteRow' },
@@ -305,16 +452,17 @@ function NoteEditor({ note, categories, onClose, onSave }) {
     { label: 'Remove column', action: 'deleteColumn' },
   ] : []
   const archived = Boolean(Number(draft.is_archived))
+  const selectedCategory = categories.find(category => String(category.id) === String(draft.category_id))
 
-  return <div onMouseDown={event => { if (event.target === event.currentTarget) onClose() }} className="fixed inset-0 z-30 grid place-items-center bg-[#24211d]/35 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true"><div className="note-editor-shell modal-shell flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+  return <div className="fixed inset-0 z-30 grid place-items-center bg-[#24211d]/35 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true"><div className="note-editor-shell modal-shell flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
     <div className="flex shrink-0 items-center justify-between border-b border-[#eeeae4] px-5 py-4"><span className="text-xs font-semibold uppercase tracking-[.13em] text-[#99958d]">{note.id ? 'Edit note' : 'New note'}</span><button onClick={onClose} className="rounded-lg p-1.5 text-[#77736c] hover:bg-[#f4f2ee]"><X size={18}/></button></div>
-    <div className="note-editor-body overflow-y-auto p-6" style={{ backgroundColor: draft.color || COLORS[0], '--note-color': draft.color || COLORS[0] }}><input autoFocus value={draft.title || ''} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="Title" className="mb-4 w-full bg-transparent text-xl font-semibold tracking-tight outline-none placeholder:text-[#bbb8b1]"/>
+    <div className="note-editor-body overflow-y-auto p-6" style={{ backgroundColor: draft.color || COLORS[0], '--note-color': draft.color || COLORS[0] }}><input autoFocus value={draft.title || ''} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="Title" className="note-title-input mb-4 w-full bg-transparent text-xl tracking-tight outline-none placeholder:text-[#bbb8b1]"/>
       <div className="mb-3 flex flex-wrap items-center gap-1 rounded-xl border border-[#e9e6e0] bg-[#faf9f6] p-1.5">
-        {button('Bold', <Bold size={16}/>, () => applyInlineFormatting(chain => chain.toggleBold()), editor.isActive('bold'))}{button('Italic', <Italic size={16}/>, () => applyInlineFormatting(chain => chain.toggleItalic()), editor.isActive('italic'))}{button('Underline', <Underline size={16}/>, () => applyInlineFormatting(chain => chain.toggleUnderline()), editor.isActive('underline'))}
-        <span className="toolbar-divider"/>{button('Bullet list', <span className="text-xs font-bold">• List</span>, command(() => editor.chain().focus().toggleBulletList()), editor.isActive('bulletList'))}{button('Checklist', <ListChecks size={16}/>, command(() => editor.chain().focus().toggleTaskList()), editor.isActive('taskList'))}{button('Quote block', <Quote size={16}/>, command(() => editor.chain().focus().toggleBlockquote()), editor.isActive('blockquote'))}{button('Code block', <Code2 size={16}/>, command(() => editor.chain().focus().toggleCodeBlock()), editor.isActive('codeBlock'))}<div className="relative"><button type="button" aria-label="Table options" title="Table options" aria-expanded={tableMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => setTableMenuOpen(open => !open)} className={`format-button ${tableMenuOpen ? 'active' : ''}`}><Table2 size={16}/></button>{tableMenuOpen && <div className="table-menu">{tableActions.length > 0 && <><strong>Edit table</strong><div className="table-action-grid">{tableActions.map(item => <button key={item.action} type="button" className="table-action" disabled={!editor.can()[item.action]()} onMouseDown={event => event.preventDefault()} onClick={() => runTableAction(item.action)}>{item.label}</button>)}</div><button type="button" className="table-action danger" disabled={!editor.can().deleteTable()} onMouseDown={event => event.preventDefault()} onClick={() => runTableAction('deleteTable')}>Delete table</button><span className="table-menu-divider"/></>}<strong>{tableActions.length > 0 ? 'Insert another table' : 'Insert table'}</strong><label>Rows<input type="number" min="1" max="12" value={tableRows} onChange={event => setTableRows(tableDimension(event.target.value))}/></label><label>Columns<input type="number" min="1" max="12" value={tableColumns} onChange={event => setTableColumns(tableDimension(event.target.value))}/></label><button type="button" onMouseDown={event => event.preventDefault()} onClick={insertTable}>Add {tableRows} × {tableColumns} table</button></div>}</div>
-        <span className="toolbar-divider"/><select aria-label="Font" onChange={event => applyInlineFormatting(chain => chain.setFontFamily(event.target.value))} className="toolbar-select"><option value="">Font</option><option value="Inter">Sans</option><option value="Georgia">Serif</option><option value="monospace">Mono</option></select><select aria-label="Text size" onChange={event => applyInlineFormatting(chain => chain.updateAttributes('textStyle', { fontSize: event.target.value }))} className="toolbar-select"><option value="">Size</option><option value="14px">Small</option><option value="16px">Medium</option><option value="20px">Large</option></select><span className="toolbar-divider"/><div className="relative"><button type="button" aria-label="Text color" title="Text color" aria-expanded={colorMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => setColorMenuOpen(open => !open)} className={`color-menu-trigger ${colorMenuOpen ? 'active' : ''}`}><Palette size={16}/><ChevronDown size={12}/></button>{colorMenuOpen && <div className="text-color-menu" aria-label="Text color options">{TEXT_COLORS.map(color => <button key={color.value} type="button" aria-label={`${color.name} text`} title={color.name} onMouseDown={event => event.preventDefault()} onClick={() => { applyInlineFormatting(chain => chain.setColor(color.value)); setColorMenuOpen(false) }} style={{ backgroundColor: color.value }} className={`text-color-swatch ${editor.isActive('textStyle', { color: color.value }) ? 'active' : ''}`}/>)}</div>}</div>
+        {button('Bold', <Bold size={16}/>, () => applyInlineFormatting(chain => chain.toggleBold()), formatting?.bold)}{button('Italic', <Italic size={16}/>, () => applyInlineFormatting(chain => chain.toggleItalic()), formatting?.italic)}{button('Underline', <Underline size={16}/>, () => applyInlineFormatting(chain => chain.toggleUnderline()), formatting?.underline)}{button('Strikethrough', <Strikethrough size={16}/>, () => applyInlineFormatting(chain => chain.toggleStrike()), formatting?.strike)}
+        <span className="toolbar-divider"/>{button('Bullet list', <span className="text-xs font-bold">• List</span>, command(() => editor.chain().focus().toggleBulletList()), editor.isActive('bulletList'), 'list-format-button')}{button('Checklist', <ListChecks size={16}/>, command(() => editor.chain().focus().toggleTaskList()), editor.isActive('taskList'))}{button('Quote block', <Quote size={16}/>, command(() => editor.chain().focus().toggleBlockquote()), editor.isActive('blockquote'))}{button('Code block', <Code2 size={16}/>, command(() => editor.chain().focus().toggleCodeBlock()), editor.isActive('codeBlock'))}<div className="relative"><button type="button" aria-label="Table options" title="Table options" aria-expanded={tableMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => setTableMenuOpen(open => !open)} className={`format-button ${tableMenuOpen ? 'active' : ''}`}><Table2 size={16}/></button>{tableMenuOpen && <div className="table-menu">{tableActions.length > 0 && <><strong>Edit table</strong><div className="table-action-grid">{tableActions.map(item => <button key={item.action} type="button" className="table-action" disabled={!editor.can()[item.action]()} onMouseDown={event => event.preventDefault()} onClick={() => runTableAction(item.action)}>{item.label}</button>)}</div><strong>Resize current</strong><label>Column px<input type="number" min="84" max="600" value={tableColumnWidth} onChange={event => setTableColumnWidth(tablePixels(event.target.value, 84, 600))}/></label><button type="button" className="table-action" onMouseDown={event => event.preventDefault()} onClick={setCurrentColumnWidth}>Set column width</button><label>Row px<input type="number" min="32" max="400" value={tableRowHeight} onChange={event => setTableRowHeight(tablePixels(event.target.value, 32, 400))}/></label><button type="button" className="table-action" onMouseDown={event => event.preventDefault()} onClick={setCurrentRowHeight}>Set row height</button><small>Drag a column border for quick resizing.</small><button type="button" className="table-action danger" disabled={!editor.can().deleteTable()} onMouseDown={event => event.preventDefault()} onClick={() => runTableAction('deleteTable')}>Delete table</button><span className="table-menu-divider"/></>}<strong>{tableActions.length > 0 ? 'Insert another table' : 'Insert table'}</strong><label>Rows<input type="number" min="1" max="12" value={tableRows} onChange={event => setTableRows(tableDimension(event.target.value))}/></label><label>Columns<input type="number" min="1" max="12" value={tableColumns} onChange={event => setTableColumns(tableDimension(event.target.value))}/></label><button type="button" onMouseDown={event => event.preventDefault()} onClick={insertTable}>Add {tableRows} × {tableColumns} table</button></div>}</div>
+        <span className="toolbar-divider"/><div className="relative"><button type="button" aria-label="Font" title="Font" aria-expanded={fontMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => { setFontMenuOpen(open => !open); setSizeMenuOpen(false) }} className={`format-menu-trigger ${fontMenuOpen ? 'active' : ''}`}><Type size={16}/><ChevronDown size={12}/></button>{fontMenuOpen && <div className="format-menu" aria-label="Font options">{FONT_OPTIONS.map(option => <button key={option.label} type="button" onMouseDown={event => event.preventDefault()} onClick={() => { applyInlineFormatting(chain => option.value ? chain.setFontFamily(option.value) : chain.unsetFontFamily()); setFontMenuOpen(false) }}>{option.label}</button>)}</div>}</div><div className="relative"><button type="button" aria-label="Text size" title="Text size" aria-expanded={sizeMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => { setSizeMenuOpen(open => !open); setFontMenuOpen(false) }} className={`format-menu-trigger ${sizeMenuOpen ? 'active' : ''}`}><TextCursorInput size={16}/><ChevronDown size={12}/></button>{sizeMenuOpen && <div className="format-menu" aria-label="Text size options">{SIZE_OPTIONS.map(option => <button key={option.label} type="button" onMouseDown={event => event.preventDefault()} onClick={() => { applyInlineFormatting(chain => option.value ? chain.setMark('textStyle', { fontSize: option.value }) : chain.setMark('textStyle', { fontSize: null }).removeEmptyTextStyle()); setSizeMenuOpen(false) }}>{option.label}</button>)}</div>}</div><span className="toolbar-divider"/><div className="relative"><button type="button" aria-label="Text color" title="Text color" aria-expanded={colorMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => setColorMenuOpen(open => !open)} className={`color-menu-trigger ${colorMenuOpen ? 'active' : ''}`}><Palette size={16}/><ChevronDown size={12}/></button>{colorMenuOpen && <div className="text-color-menu" aria-label="Text color options">{TEXT_COLORS.map(color => <button key={color.value} type="button" aria-label={`${color.name} text`} title={color.name} onMouseDown={event => event.preventDefault()} onClick={() => { applyInlineFormatting(chain => chain.setColor(color.value)); setColorMenuOpen(false) }} style={{ backgroundColor: color.value }} className={`text-color-swatch ${editor.isActive('textStyle', { color: color.value }) ? 'active' : ''}`}/>)}</div>}</div>{button('Clear formatting', <Eraser size={16}/>, () => applyInlineFormatting(chain => chain.unsetAllMarks().clearNodes()))}
       </div><div className="note-editor-content"><EditorContent editor={editor}/></div>
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#eeeae4] pt-5"><div className="flex flex-wrap items-center gap-3"><div className="flex items-center gap-1.5">{COLORS.map(color => <button key={color} onClick={() => setDraft({ ...draft, color })} style={{ backgroundColor: color }} className={`h-6 w-6 rounded-full border border-black/[.09] ${draft.color === color ? 'ring-2 ring-[#333] ring-offset-2' : ''}`}>{draft.color === color && <Check className="mx-auto" size={12}/>}</button>)}</div><select value={draft.category_id ?? ''} onChange={event => setDraft({ ...draft, category_id: event.target.value || null })} className="rounded-lg border border-[#e4e1db] bg-white px-2 py-1.5 text-xs outline-none"><option value="">No category</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button onClick={() => setDraft({ ...draft, is_archived: !archived })} className={`archive-editor-button ${archived ? 'active' : ''}`}>{archived ? <ArchiveRestore size={14}/> : <Archive size={14}/>} {archived ? 'Restore' : 'Archive'}</button></div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-[#77736c] hover:bg-[#f4f2ee]">Cancel</button><button onClick={submit} disabled={saving} className="rounded-lg bg-[#282828] px-4 py-2 text-sm font-medium text-white hover:bg-black disabled:opacity-60">{saving ? 'Saving…' : 'Save note'}</button></div></div>
+      <div className="note-editor-footer mt-5 flex flex-wrap items-center justify-between gap-3 pt-5"><div className="flex flex-wrap items-center gap-3"><div className="relative"><button type="button" aria-label="Note background color" title="Note background color" aria-expanded={noteColorMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => setNoteColorMenuOpen(open => !open)} className={`note-editor-control note-color-menu-trigger ${noteColorMenuOpen ? 'active' : ''}`}><Palette size={15}/><span className="note-color-preview" style={{ backgroundColor: draft.color || COLORS[0] }}/><span>Color</span><ChevronDown size={12}/></button>{noteColorMenuOpen && <div className="note-color-menu" aria-label="Note background color options"><strong>Note color</strong><div className="note-color-grid">{NOTE_COLORS.map(color => <button key={color.value} type="button" aria-label={color.name} title={color.name} onMouseDown={event => event.preventDefault()} onClick={() => { setDraft(value => ({ ...value, color: color.value })); setNoteColorMenuOpen(false) }} style={{ backgroundColor: color.value }} className={`note-color-swatch ${draft.color === color.value ? 'active' : ''}`}>{draft.color === color.value && <Check size={12}/>}</button>)}</div></div>}</div><div className="relative"><button type="button" aria-label="Category" title="Category" aria-expanded={categoryMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => setCategoryMenuOpen(open => !open)} className={`note-editor-control note-category-menu-trigger ${categoryMenuOpen ? 'active' : ''}`}><Grid2X2 size={14}/><span>{selectedCategory?.name || 'No category'}</span><ChevronDown size={12}/></button>{categoryMenuOpen && <div className="note-category-menu" aria-label="Category options"><strong>Category</strong><button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { setDraft(value => ({ ...value, category_id: null })); setCategoryMenuOpen(false) }} className={`note-category-option ${!selectedCategory ? 'active' : ''}`}>No category{!selectedCategory && <Check size={13}/>}</button>{categories.map(category => <button key={category.id} type="button" onMouseDown={event => event.preventDefault()} onClick={() => { setDraft(value => ({ ...value, category_id: category.id })); setCategoryMenuOpen(false) }} className={`note-category-option ${selectedCategory?.id === category.id ? 'active' : ''}`}>{category.name}{selectedCategory?.id === category.id && <Check size={13}/>}</button>)}</div>}</div><button onClick={() => setDraft({ ...draft, is_archived: !archived })} className={`note-editor-control archive-editor-button ${archived ? 'active' : ''}`}>{archived ? <ArchiveRestore size={14}/> : <Archive size={14}/>} {archived ? 'Restore' : 'Archive'}</button></div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-[#77736c] hover:bg-[#f4f2ee]">Cancel</button><button onClick={submit} disabled={saving} className="rounded-lg bg-[#282828] px-4 py-2 text-sm font-medium text-white hover:bg-black disabled:opacity-60">{saving ? 'Saving…' : 'Save note'}</button></div></div>
     </div>
   </div></div>
 }
