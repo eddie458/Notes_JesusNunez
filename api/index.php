@@ -392,7 +392,7 @@ try {
     }
     $data = input();
     $name = mb_substr(trim((string)($data['name'] ?? '')), 0, 100);
-    if ($method !== 'GET' && $name === '') fail('Category name is required.', 422, 'INVALID_NAME');
+    if (in_array($method, ['POST', 'PUT'], true) && $name === '') fail('Category name is required.', 422, 'INVALID_NAME');
     if ($method === 'POST' && !$id) {
       $statement = $db->prepare('INSERT INTO categories (user_id, name) VALUES (?, ?)');
       $statement->execute([$userId, $name]);
@@ -408,9 +408,17 @@ try {
       $row ? reply($row) : fail('Category not found.', 404, 'NOT_FOUND');
     }
     if ($method === 'DELETE' && $id) {
-      $statement = $db->prepare('DELETE FROM categories WHERE id = ? AND user_id = ?');
+      $db->beginTransaction();
+      $statement = $db->prepare('SELECT id FROM categories WHERE id = ? AND user_id = ? FOR UPDATE');
       $statement->execute([$id, $userId]);
-      $statement->rowCount() ? reply(null, 204) : fail('Category not found.', 404, 'NOT_FOUND');
+      if (!$statement->fetch()) {
+        $db->rollBack();
+        fail('Category not found.', 404, 'NOT_FOUND');
+      }
+      $db->prepare('UPDATE notes SET category_id = NULL WHERE category_id = ? AND user_id = ?')->execute([$id, $userId]);
+      $db->prepare('DELETE FROM categories WHERE id = ? AND user_id = ?')->execute([$id, $userId]);
+      $db->commit();
+      reply(null, 204);
     }
   }
 
