@@ -56,6 +56,20 @@ npm run dev
 
 Open `http://localhost:5173`. Vite proxies `/api` requests to PHP at `127.0.0.1:8080`.
 
+## Appearance and note editing
+
+Choose **Linen**, **Ocean**, **Rose**, or **Midnight** from the palette control in the header or sidebar. The selected appearance is remembered on the current browser; notes remain stored in MySQL.
+
+The note editor offers twelve font choices, seven text sizes, preset colors, and custom color pickers with hex input for both note backgrounds and selected text. Formatting also works at the text cursor for what you type next. The toolbar includes lists, checklists, quotes, code, tables with row and column sizing, and undo/redo.
+
+Use **Add image** to choose a PNG, JPG, or WebP file (up to 10 MB) or enter an HTTPS image link. Uploaded images are resized to fit within 1600 pixels, embedded in the note content, and saved in MySQL without a separate upload folder or database migration. Embedded images are limited to 2 MB each and note content to 4 MB. Select an image in the editor to remove it. Linked images require their source to remain available.
+
+Run the content persistence and sanitization checks with:
+
+```bash
+php tests/note-content.php
+```
+
 ## Administration
 
 Sign in with an administrator account and open `/admin/`. Administrators can:
