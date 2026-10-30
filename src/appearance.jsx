@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react'
 import { Check, ChevronDown, Palette } from 'lucide-react'
 
 export const THEMES = [
@@ -36,18 +36,38 @@ export function useOutsideDismiss(ref, onDismiss) {
   }, [ref, onDismiss])
 }
 
-export function ThemePicker({ compact = false }) {
+export function ThemePicker() {
   const { theme, setTheme } = useContext(AppearanceContext)
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  const triggerRef = useRef(null)
+  const menuId = useId()
   useOutsideDismiss(ref, () => setOpen(false))
+  useEffect(() => {
+    if (open) ref.current?.querySelector('[role="menuitemradio"][aria-checked="true"]')?.focus()
+  }, [open])
   const selected = THEMES.find(item => item.id === theme)
-  const options = <div className="theme-options">{THEMES.map(item => <button key={item.id} type="button" className={`theme-option ${theme === item.id ? 'active' : ''}`} aria-label={`${item.name} theme`} aria-pressed={theme === item.id} onClick={() => { setTheme(item.id); setOpen(false) }}>
+  const closeMenu = () => { setOpen(false); triggerRef.current?.focus() }
+  const menuKeys = event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); return }
+    if (event.key === 'Tab') { setOpen(false); return }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const items = [...ref.current.querySelectorAll('[role="menuitemradio"]')]
+    const index = items.indexOf(document.activeElement)
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+    items[next]?.focus()
+  }
+  const options = <div className="theme-options">{THEMES.map(item => <button key={item.id} type="button" role="menuitemradio" tabIndex={-1} className={`theme-option ${theme === item.id ? 'active' : ''}`} aria-label={`${item.name} theme`} aria-checked={theme === item.id} onClick={() => { setTheme(item.id); closeMenu() }}>
     <span className="theme-preview" style={{ background: item.colors[0] }}><i style={{ background: item.colors[1] }}/><i style={{ background: item.colors[2] }}/></span>
-    <span><strong>{item.name}</strong>{!compact && <small>{item.description}</small>}</span>{theme === item.id && <Check size={14}/>}
+    <span><strong>{item.name}</strong><small>{item.description}</small></span>{theme === item.id && <Check size={18}/>}
   </button>)}</div>
-  if (!compact) return <section className="appearance-card"><div className="appearance-heading"><Palette size={15}/><span>Make it yours</span></div><p>A fresh mood for your space.</p>{options}</section>
-  return <div className="theme-picker" ref={ref}><button type="button" className="header-action" aria-label="Change color palette" aria-expanded={open} onClick={() => setOpen(value => !value)}><Palette size={17}/><span>{selected.name}</span><ChevronDown size={13}/></button>{open && <div className="theme-popover"><strong>Choose your palette</strong>{options}</div>}</div>
+  return <div className="theme-picker" ref={ref}>
+    <button ref={triggerRef} type="button" className="header-action" aria-label="Change color palette" aria-haspopup="menu" aria-controls={open ? menuId : undefined} aria-expanded={open} onClick={() => setOpen(value => !value)} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true) } }}>
+      <Palette size={20}/><span>{selected.name}</span><ChevronDown size={16}/>
+    </button>
+    {open && <div id={menuId} role="menu" aria-label="Workspace color palettes" className="theme-popover" onKeyDown={menuKeys}><strong role="presentation">Choose your palette</strong>{options}</div>}
+  </div>
 }
 
 export function ColorPicker({ label, colors, value, onChange, onPreset }) {
@@ -57,7 +77,7 @@ export function ColorPicker({ label, colors, value, onChange, onPreset }) {
   useEffect(() => { setHex(normalized) }, [normalized])
   return <div className="color-picker-content">
     <strong>{label}</strong>
-    <div className="color-swatch-grid">{colors.map(color => <button key={color.value} type="button" aria-label={`${color.name} ${label === 'Text color' ? 'text' : 'note'}`} title={color.name} aria-pressed={normalized.toLowerCase() === color.value} className={`color-swatch ${normalized.toLowerCase() === color.value ? 'active' : ''}`} style={{ background: color.value }} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(color.value); onPreset?.() }}>{normalized.toLowerCase() === color.value && <Check size={12}/>}</button>)}</div>
+    <div className="color-swatch-grid">{colors.map(color => <button key={color.value} type="button" aria-label={`${color.name} ${label.replace(/ color$/i, '').toLowerCase()}`} title={color.name} aria-pressed={normalized.toLowerCase() === color.value} className={`color-swatch ${normalized.toLowerCase() === color.value ? 'active' : ''}`} style={{ background: color.value }} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(color.value); onPreset?.() }}>{normalized.toLowerCase() === color.value && <Check size={12}/>}</button>)}</div>
     <div className="custom-color"><label className="native-color-label"><input type="color" aria-label={`Custom ${label.toLowerCase()}`} value={/^#[0-9a-f]{6}$/i.test(normalized) ? normalized : '#252525'} onChange={event => onChange(event.target.value)}/><span>Custom color</span></label><input className="hex-input" aria-label={`${label} hex code`} maxLength={7} spellCheck={false} value={hex} onChange={event => { const next = event.target.value; setHex(next); if (/^#[0-9a-f]{6}$/i.test(next)) onChange(next) }} onBlur={() => setHex(normalized)}/></div>
   </div>
 }

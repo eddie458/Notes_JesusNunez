@@ -17,6 +17,10 @@ function safeNoteImageSource(string $source): bool {
     && !isset($parts['user']) && !isset($parts['pass']);
 }
 
+function safeNoteColor(string $value): bool {
+  return preg_match('/^(?:#[0-9a-f]{3,8}|rgba?\(\s*[0-9.% ,\/]+\s*\)|[a-z]+)$/iD', $value) === 1;
+}
+
 function safeNoteStyle(string $style, string $tag): string {
   $safe = [];
   foreach (explode(';', $style) as $declaration) {
@@ -25,13 +29,15 @@ function safeNoteStyle(string $style, string $tag): string {
     [$property, $value] = array_map('trim', $parts);
     $property = strtolower($property);
     if ($tag === 'span') {
-      if ($property === 'color' && preg_match('/^(?:#[0-9a-f]{3,8}|rgba?\(\s*[0-9.% ,\/]+\s*\)|[a-z]+)$/iD', $value)) {
+      if ($property === 'color' && safeNoteColor($value)) {
         $safe[] = "color: $value";
       } elseif ($property === 'font-size' && preg_match('/^(\d{1,2})px$/D', $value, $matches) && (int)$matches[1] >= 8 && (int)$matches[1] <= 96) {
         $safe[] = "font-size: $value";
       } elseif ($property === 'font-family' && strlen($value) <= 200 && preg_match('/^[a-zA-Z0-9 ,\.\-\'"\s]+$/D', $value)) {
         $safe[] = "font-family: $value";
       }
+    } elseif ($tag === 'mark' && (($property === 'background-color' && safeNoteColor($value)) || ($property === 'color' && $value === 'inherit'))) {
+      $safe[] = "$property: $value";
     } elseif (in_array($tag, ['td', 'th'], true) && $property === 'height' && preg_match('/^(\d{1,3})px$/D', $value, $matches) && (int)$matches[1] >= 32 && (int)$matches[1] <= 400) {
       $safe[] = 'height: ' . (int)$matches[1] . 'px';
     } elseif ($tag === 'col' && in_array($property, ['width', 'min-width'], true) && preg_match('/^(\d{1,4})px$/D', $value, $matches) && (int)$matches[1] >= 1 && (int)$matches[1] <= 5000) {
@@ -50,7 +56,7 @@ function sanitizeHtml(string $html): string {
   libxml_clear_errors();
   libxml_use_internal_errors($previousErrors);
   if (!$loaded) return '';
-  $allowed = ['p', 'br', 'strong', 'em', 'u', 's', 'span', 'ul', 'ol', 'li', 'pre', 'code', 'div', 'blockquote', 'label', 'input', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'colgroup', 'col', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'a'];
+  $allowed = ['p', 'br', 'strong', 'em', 'u', 's', 'span', 'mark', 'ul', 'ol', 'li', 'pre', 'code', 'div', 'blockquote', 'label', 'input', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'colgroup', 'col', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'a'];
   $blocked = ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'template'];
   $walker = function (DOMNode $node) use (&$walker, $allowed, $blocked): void {
     foreach (iterator_to_array($node->childNodes) as $child) {
@@ -86,10 +92,12 @@ function sanitizeHtml(string $html): string {
             && preg_match('/^\d+(?:,\d+)*$/D', $value)
             && count(array_filter(explode(',', $value), fn($width) => (int)$width < 0 || (int)$width > 600)) === 0)
           || ($tag === 'col' && $name === 'width' && ctype_digit($value) && (int)$value >= 1 && (int)$value <= 5000);
-        $style = in_array($tag, ['span', 'td', 'th', 'col'], true) && $name === 'style';
-        $image = $tag === 'img' && in_array($name, ['src', 'alt'], true);
+        $style = in_array($tag, ['span', 'mark', 'td', 'th', 'col'], true) && $name === 'style';
+        $highlight = $tag === 'mark' && $name === 'data-color' && safeNoteColor(trim($attribute->value));
+        $image = $tag === 'img' && (in_array($name, ['src', 'alt'], true)
+          || ($name === 'width' && ctype_digit($value) && (int)$value >= 64 && (int)$value <= 1600));
         $link = $tag === 'a' && $name === 'href' && preg_match('#^(?:https?://|mailto:)[^\s]+$#iD', trim($attribute->value));
-        if (!($task || $table || $style || $image || $link)) $child->removeAttributeNode($attribute);
+        if (!($task || $table || $style || $highlight || $image || $link)) $child->removeAttributeNode($attribute);
       }
       if ($child->hasAttribute('style')) {
         $safe = safeNoteStyle($child->getAttribute('style'), $tag);

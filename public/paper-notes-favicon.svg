@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Paper Notes</title>
+  <rect width="64" height="64" rx="16" fill="#44725c"/>
+  <g transform="rotate(-6 32 32)">
+    <path d="M22 12h15l9 9v27a4 4 0 0 1-4 4H22a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4Z" fill="#fafbf6"/>
+    <path d="M37 12v7a2 2 0 0 0 2 2h7" fill="#cbdccd"/>
+    <path d="M25 29h14M25 36h14M25 43h9" fill="none" stroke="#44725c" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>

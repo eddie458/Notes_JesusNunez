@@ -1,4 +1,14 @@
+Options -Indexes
 RewriteEngine On
+
+<FilesMatch "(?:^\..*|\.(?:sql|zip|tar|gz|log|bak)$)">
+  Require all denied
+</FilesMatch>
+
+# Keep configuration, database exports, archives, and old backups private.
+RewriteRule (^|/)\.(?!well-known(?:/|$)) - [F,L]
+RewriteRule ^_Backup(?:/|$) - [F,L,NC]
+RewriteRule \.(?:sql|zip|tar|gz|log|bak)$ - [F,L,NC]
 
 # Let the PHP API and real static files/directories pass through unchanged.
 RewriteRule ^api(?:/|$) - [L]

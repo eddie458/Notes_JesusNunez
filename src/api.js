@@ -1,5 +1,6 @@
 const API = import.meta.env.VITE_API_URL || '/api'
 let csrfToken = ''
+let sessionRevision = 0
 
 export class ApiError extends Error {
   constructor(message, status, code) {
@@ -13,6 +14,7 @@ async function request(path, options = {}) {
   const method = options.method || 'GET'
   const response = await fetch(`${API}${path}`, {
     credentials: 'include',
+    cache: 'no-store',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -40,31 +42,49 @@ async function request(path, options = {}) {
   return payload
 }
 
-function rememberSession(payload) {
-  csrfToken = payload.csrf_token || ''
+function rememberSession(payload, revision) {
+  if (revision === sessionRevision) csrfToken = payload.csrf_token || ''
   return payload.user
 }
 
 export const authApi = {
-  me: () => request('/auth/me').then(rememberSession),
-  login: (email, password) => request('/auth/login', {
-    method: 'POST', body: JSON.stringify({ email, password }),
-  }).then(rememberSession),
-  logout: () => request('/auth/logout', { method: 'POST' }).finally(() => { csrfToken = '' }),
+  me: () => {
+    const revision = ++sessionRevision
+    return request('/auth/me').then(payload => rememberSession(payload, revision))
+  },
+  login: (email, password) => {
+    const revision = ++sessionRevision
+    return request('/auth/login', {
+      method: 'POST', body: JSON.stringify({ email, password }),
+    }).then(payload => rememberSession(payload, revision))
+  },
+  logout: () => {
+    const revision = ++sessionRevision
+    return request('/auth/logout', { method: 'POST' }).finally(() => {
+      if (revision === sessionRevision) csrfToken = ''
+    })
+  },
 }
 
 export const notesApi = {
-  list: () => request('/notes'),
+  list: (workspaceId) => request(`/notes?workspace_id=${encodeURIComponent(workspaceId)}`),
   create: (note) => request('/notes', { method: 'POST', body: JSON.stringify(note) }),
   update: (id, note) => request(`/notes/${id}`, { method: 'PUT', body: JSON.stringify(note) }),
   remove: (id) => request(`/notes/${id}`, { method: 'DELETE' }),
+  move: (id, workspaceId) => request(`/notes/${id}/move`, { method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }) }),
 }
 
 export const categoriesApi = {
-  list: () => request('/categories'),
-  create: (name) => request('/categories', { method: 'POST', body: JSON.stringify({ name }) }),
+  list: (workspaceId) => request(`/categories?workspace_id=${encodeURIComponent(workspaceId)}`),
+  create: (name, workspaceId) => request('/categories', { method: 'POST', body: JSON.stringify({ name, workspace_id: workspaceId }) }),
   update: (id, name) => request(`/categories/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   remove: (id) => request(`/categories/${id}`, { method: 'DELETE' }),
+}
+
+export const workspacesApi = {
+  list: () => request('/workspaces'),
+  create: (name) => request('/workspaces', { method: 'POST', body: JSON.stringify({ name }) }),
+  rename: (id, name) => request(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
 }
 
 export const adminApi = {

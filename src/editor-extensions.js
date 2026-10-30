@@ -1,4 +1,24 @@
 import { Extension, Node, mergeAttributes } from '@tiptap/core'
+import { ReactNodeViewRenderer } from '@tiptap/react'
+import { TaskItem } from '@tiptap/extension-list'
+import ResizableNoteImage from './ResizableNoteImage'
+
+export const AlignedTaskItem = TaskItem.extend({
+  addNodeView() {
+    const render = this.parent()
+    return props => {
+      const view = render(props)
+      const label = view.dom.querySelector(':scope > label')
+      return {
+        ...view,
+        // Checkbox positioning is presentation, not an edit to the document.
+        ignoreMutation: mutation => mutation.type === 'attributes'
+          && mutation.target === label && mutation.attributeName === 'style'
+          ? true : view.ignoreMutation?.(mutation) ?? false,
+      }
+    }
+  },
+})
 
 export const FontSize = Extension.create({
   name: 'fontSize',
@@ -20,9 +40,19 @@ export const NoteImage = Node.create({
   group: 'block',
   draggable: true,
   atom: true,
-  addAttributes() { return { src: { default: null }, alt: { default: '' } } },
+  addAttributes() { return {
+    src: { default: null }, alt: { default: '' },
+    width: {
+      default: null,
+      parseHTML: element => {
+        const width = element.getAttribute('width')
+        return /^\d+$/.test(width || '') && Number(width) >= 64 && Number(width) <= 1600 ? Number(width) : null
+      },
+    },
+  } },
   parseHTML() { return [{ tag: 'img[src]', getAttrs: element => isImageSource(element.getAttribute('src')) ? null : false }] },
   renderHTML({ HTMLAttributes }) { return ['img', mergeAttributes(HTMLAttributes, { loading: 'lazy' })] },
+  addNodeView() { return ReactNodeViewRenderer(ResizableNoteImage) },
 })
 
 export function readableNoteColor(color) {

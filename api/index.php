@@ -10,6 +10,7 @@ ini_set('log_errors', '1');
 
 require __DIR__ . '/Database.php';
 require __DIR__ . '/NoteContent.php';
+require __DIR__ . '/NoteSession.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -20,25 +21,21 @@ header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-CSRF-Token');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: same-origin');
+header('Cache-Control: no-store');
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
   http_response_code(204);
   exit;
 }
 
-ini_set('session.use_strict_mode', '1');
-if ((string)ini_get('session.save_path') === '') {
-  session_save_path(sys_get_temp_dir());
+try {
+  NoteSession::start($config);
+} catch (Throwable $error) {
+  error_log('[Paper Notes] Session error: ' . $error->getMessage());
+  http_response_code(503);
+  echo json_encode(['error' => 'Your session is temporarily unavailable. Please try again.', 'code' => 'SESSION_UNAVAILABLE']);
+  exit;
 }
-session_name($config['session_name']);
-session_set_cookie_params([
-  'lifetime' => 0,
-  'path' => '/',
-  'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
-  'httponly' => true,
-  'samesite' => 'Lax',
-]);
-session_start();
 
 function reply(mixed $data, int $status = 200): never {
   http_response_code($status);
@@ -91,7 +88,13 @@ function currentUser(PDO $db): ?array {
   if (!$id) return null;
   $statement = $db->prepare('SELECT id, email, display_name, is_admin, last_login_at, created_at FROM users WHERE id = ? LIMIT 1');
   $statement->execute([$id]);
-  return $statement->fetch() ?: null;
+  $user = $statement->fetch();
+  if (!$user) {
+    NoteSession::logout();
+    return null;
+  }
+  NoteSession::touch();
+  return $user;
 }
 
 function requireUser(PDO $db): array {
@@ -106,26 +109,57 @@ function requireAdmin(PDO $db): array {
   return $user;
 }
 
-function ownedCategory(PDO $db, int $userId, mixed $category): ?int {
+function defaultWorkspace(PDO $db, int $userId): int {
+  $statement = $db->prepare('SELECT id FROM workspaces WHERE user_id = ? ORDER BY id LIMIT 1');
+  $statement->execute([$userId]);
+  $id = $statement->fetchColumn();
+  if ($id !== false) return (int)$id;
+  // A new account gets Personal on its first visit. The unique name also
+  // handles two tabs making their first request at the same time.
+  $db->prepare("INSERT IGNORE INTO workspaces (user_id, name) VALUES (?, 'Personal')")->execute([$userId]);
+  $statement->execute([$userId]);
+  return (int)$statement->fetchColumn();
+}
+
+function ownedWorkspace(PDO $db, int $userId, mixed $workspace): int {
+  if ($workspace === null || $workspace === '') return defaultWorkspace($db, $userId);
+  if ((!is_int($workspace) && !is_string($workspace)) || !ctype_digit((string)$workspace) || (int)$workspace < 1) fail('Workspace not found.', 422, 'INVALID_WORKSPACE');
+  $id = (int)$workspace;
+  $statement = $db->prepare('SELECT id FROM workspaces WHERE id = ? AND user_id = ? LIMIT 1');
+  $statement->execute([$id, $userId]);
+  if (!$statement->fetch()) fail('Workspace not found.', 422, 'INVALID_WORKSPACE');
+  return $id;
+}
+
+function workspaceName(array $data): string {
+  if (!is_string($data['name'] ?? null)) fail('Enter a workspace name of 1–60 characters.', 422, 'INVALID_NAME');
+  $name = trim((string)($data['name'] ?? ''));
+  if ($name === '' || mb_strlen($name) > 60) fail('Enter a workspace name of 1–60 characters.', 422, 'INVALID_NAME');
+  return $name;
+}
+
+function ownedCategory(PDO $db, int $userId, int $workspaceId, mixed $category): ?int {
   if ($category === null || $category === '') return null;
   $id = (int)$category;
-  $statement = $db->prepare('SELECT id FROM categories WHERE id = ? AND user_id = ? LIMIT 1');
-  $statement->execute([$id, $userId]);
+  $statement = $db->prepare('SELECT id FROM categories WHERE id = ? AND user_id = ? AND workspace_id = ? LIMIT 1');
+  $statement->execute([$id, $userId, $workspaceId]);
   if (!$statement->fetch()) fail('Category not found.', 422, 'INVALID_CATEGORY');
   return $id;
 }
 
-function noteData(PDO $db, int $userId, array $data): array {
+function noteData(PDO $db, int $userId, array $data, ?int $existingWorkspace = null): array {
   if (strlen((string)($data['content'] ?? '')) > 4 * 1024 * 1024) fail('This note is too large. Please use smaller images.', 413, 'NOTE_TOO_LARGE');
   $color = (string)($data['color'] ?? '#ffffff');
   if (!preg_match('/^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/', $color)) fail('Invalid note color.');
+  $workspaceId = ownedWorkspace($db, $userId, $data['workspace_id'] ?? $existingWorkspace);
   return [
+    'workspace_id' => $workspaceId,
     'title' => mb_substr(trim((string)($data['title'] ?? '')), 0, 255),
     'content' => sanitizeHtml((string)($data['content'] ?? '')),
     'color' => $color,
     'is_pinned' => !empty($data['is_pinned']) ? 1 : 0,
     'is_archived' => !empty($data['is_archived']) ? 1 : 0,
-    'category_id' => ownedCategory($db, $userId, $data['category_id'] ?? null),
+    'category_id' => ownedCategory($db, $userId, $workspaceId, $data['category_id'] ?? null),
   ];
 }
 
@@ -158,9 +192,7 @@ try {
       if (!$user || !password_verify($password, $user['password_hash'])) {
         fail('The email or password is incorrect.', 401, 'INVALID_CREDENTIALS');
       }
-      session_regenerate_id(true);
-      $_SESSION['user_id'] = (int)$user['id'];
-      $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+      NoteSession::login((int)$user['id']);
       $db->prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([$user['id']]);
       $user['last_login_at'] = gmdate('Y-m-d H:i:s');
       reply(['user' => publicUser($user), 'csrf_token' => csrfToken()]);
@@ -172,12 +204,7 @@ try {
     if ($method === 'POST' && $action === 'logout') {
       requireUser($db);
       requireCsrf();
-      $_SESSION = [];
-      if (ini_get('session.use_cookies')) {
-        $params = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'] ?? '', $params['secure'], $params['httponly']);
-      }
-      session_destroy();
+      NoteSession::logout();
       reply(null, 204);
     }
     fail('Route not found.', 404, 'NOT_FOUND');
@@ -286,10 +313,32 @@ try {
   if ($method !== 'GET') requireCsrf();
   $id = isset($parts[1]) && ctype_digit($parts[1]) ? (int)$parts[1] : null;
 
+  if ($resource === 'workspaces') {
+    defaultWorkspace($db, $userId);
+    if ($method === 'GET' && !$id) {
+      $statement = $db->prepare('SELECT id, name FROM workspaces WHERE user_id = ? ORDER BY id');
+      $statement->execute([$userId]);
+      reply($statement->fetchAll());
+    }
+    if ($method === 'POST' && !$id) {
+      $name = workspaceName(input());
+      $db->prepare('INSERT INTO workspaces (user_id, name) VALUES (?, ?)')->execute([$userId, $name]);
+      reply(['id' => (int)$db->lastInsertId(), 'name' => $name], 201);
+    }
+    if ($method === 'PUT' && $id) {
+      ownedWorkspace($db, $userId, $id);
+      $name = workspaceName(input());
+      $db->prepare('UPDATE workspaces SET name = ? WHERE id = ? AND user_id = ?')->execute([$name, $id, $userId]);
+      reply(['id' => $id, 'name' => $name]);
+    }
+    fail('Route not found.', 404, 'NOT_FOUND');
+  }
+
   if ($resource === 'notes') {
     if ($method === 'GET' && !$id) {
-      $statement = $db->prepare('SELECT * FROM notes WHERE user_id = ? ORDER BY is_pinned DESC, updated_at DESC');
-      $statement->execute([$userId]);
+      $workspaceId = ownedWorkspace($db, $userId, $_GET['workspace_id'] ?? null);
+      $statement = $db->prepare('SELECT * FROM notes WHERE user_id = ? AND workspace_id = ? ORDER BY is_pinned DESC, updated_at DESC');
+      $statement->execute([$userId, $workspaceId]);
       reply($statement->fetchAll());
     }
     if ($method === 'GET' && $id) reply(getNote($db, $userId, $id));
@@ -297,22 +346,30 @@ try {
       $note = noteData($db, $userId, input());
       $note['user_id'] = $userId;
       $statement = $db->prepare(
-        'INSERT INTO notes (user_id, title, content, color, is_pinned, is_archived, category_id)
-         VALUES (:user_id, :title, :content, :color, :is_pinned, :is_archived, :category_id)'
+        'INSERT INTO notes (user_id, workspace_id, title, content, color, is_pinned, is_archived, category_id)
+         VALUES (:user_id, :workspace_id, :title, :content, :color, :is_pinned, :is_archived, :category_id)'
       );
       $statement->execute($note);
       reply(getNote($db, $userId, (int)$db->lastInsertId()), 201);
     }
     if ($method === 'PUT' && $id) {
-      getNote($db, $userId, $id);
-      $note = noteData($db, $userId, input());
+      $existing = getNote($db, $userId, $id);
+      $note = noteData($db, $userId, input(), (int)$existing['workspace_id']);
       $note['id'] = $id;
       $note['user_id'] = $userId;
       $statement = $db->prepare(
-        'UPDATE notes SET title=:title, content=:content, color=:color, is_pinned=:is_pinned,
+        'UPDATE notes SET workspace_id=:workspace_id, title=:title, content=:content, color=:color, is_pinned=:is_pinned,
          is_archived=:is_archived, category_id=:category_id WHERE id=:id AND user_id=:user_id'
       );
       $statement->execute($note);
+      reply(getNote($db, $userId, $id));
+    }
+    if ($method === 'POST' && $id && ($parts[2] ?? '') === 'move') {
+      getNote($db, $userId, $id);
+      $data = input();
+      if (empty($data['workspace_id'])) fail('Choose a destination workspace.', 422, 'INVALID_WORKSPACE');
+      $workspaceId = ownedWorkspace($db, $userId, $data['workspace_id']);
+      $db->prepare('UPDATE notes SET category_id = CASE WHEN workspace_id = ? THEN category_id ELSE NULL END, workspace_id = ? WHERE id = ? AND user_id = ?')->execute([$workspaceId, $workspaceId, $id, $userId]);
       reply(getNote($db, $userId, $id));
     }
     if ($method === 'DELETE' && $id) {
@@ -324,16 +381,18 @@ try {
 
   if ($resource === 'categories') {
     if ($method === 'GET' && !$id) {
-      $statement = $db->prepare('SELECT * FROM categories WHERE user_id = ? ORDER BY name');
-      $statement->execute([$userId]);
+      $workspaceId = ownedWorkspace($db, $userId, $_GET['workspace_id'] ?? null);
+      $statement = $db->prepare('SELECT * FROM categories WHERE user_id = ? AND workspace_id = ? ORDER BY name');
+      $statement->execute([$userId, $workspaceId]);
       reply($statement->fetchAll());
     }
     $data = input();
     $name = mb_substr(trim((string)($data['name'] ?? '')), 0, 100);
     if (in_array($method, ['POST', 'PUT'], true) && $name === '') fail('Category name is required.', 422, 'INVALID_NAME');
     if ($method === 'POST' && !$id) {
-      $statement = $db->prepare('INSERT INTO categories (user_id, name) VALUES (?, ?)');
-      $statement->execute([$userId, $name]);
+      $workspaceId = ownedWorkspace($db, $userId, $data['workspace_id'] ?? null);
+      $statement = $db->prepare('INSERT INTO categories (user_id, workspace_id, name) VALUES (?, ?, ?)');
+      $statement->execute([$userId, $workspaceId, $name]);
       $created = $db->prepare('SELECT * FROM categories WHERE id = ? AND user_id = ?');
       $created->execute([(int)$db->lastInsertId(), $userId]);
       reply($created->fetch(), 201);
@@ -365,7 +424,12 @@ try {
   if ($db instanceof PDO && $db->inTransaction()) $db->rollBack();
   error_log('[Paper Notes] Database error: ' . $error->getMessage());
   $duplicate = $error->getCode() === '23000';
-  fail($duplicate ? 'That email or category already exists.' : 'Database error.', $duplicate ? 409 : 500, $duplicate ? 'DUPLICATE_VALUE' : 'DATABASE_ERROR');
+  $duplicateMessage = match ($resource ?? '') {
+    'workspaces' => 'You already have a workspace with that name.',
+    'categories' => 'This workspace already has a category with that name.',
+    default => 'That email address is already in use.',
+  };
+  fail($duplicate ? $duplicateMessage : 'Database error.', $duplicate ? 409 : 500, $duplicate ? 'DUPLICATE_VALUE' : 'DATABASE_ERROR');
 } catch (Throwable $error) {
   error_log('[Paper Notes] Server error: ' . $error->getMessage());
   fail('Server error.', 500, 'SERVER_ERROR');
