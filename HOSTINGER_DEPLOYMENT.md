@@ -2,19 +2,25 @@
 
 Live app: https://notes.jesusnunez.top
 
-The latest working-tree frontend and PHP API were deployed on October 8, 2026,
-using Hostinger File Manager and phpMyAdmin. The Tracker deployment document was
-used as a guide; Paper Notes keeps its existing public API directory and private
-HTTP access rules. Production runs the built frontend and PHP 8.3, without Vite
-or Node.js servers.
+Commit `8702060` was deployed on October 29, 2026, using Hostinger File Manager.
+It updated the built frontend and PHP API and added rolling 30-day sign-in, with
+no database changes. The previous update, on October 8, 2026, added workspaces
+from the working tree and applied the workspace migration through phpMyAdmin.
+The Tracker deployment document was used as a guide; Paper Notes keeps its
+existing public API directory and private HTTP access rules. Production runs the
+built frontend and PHP 8.3, without Vite or Node.js servers.
 
 ## Production layout
 
 ```text
 Website directory/
+├── .paper-notes-sessions-<hash>/ Private sign-in sessions, mode 0700
 ├── notes_predeploy_backup_20261008/
-│   └── notes/                    Complete copy of the previous app
-├── notes-update.zip              Uploaded update; outside public_html
+│   └── notes/                    Copy of the app before the October 8 update
+├── notes_predeploy_backup_20261029/
+│   └── notes/                    Copy of the app before the October 29 update
+├── notes-update.zip              October 8 package; outside public_html
+├── notes-update-20261029.zip     October 29 package; outside public_html
 └── public_html/
     └── notes/                    notes.jesusnunez.top document root
         ├── index.html
@@ -27,6 +33,7 @@ Website directory/
             ├── index.php
             ├── Database.php
             ├── NoteContent.php
+            ├── NoteSession.php
             └── .htaccess
 ```
 
@@ -41,7 +48,7 @@ the old `_Backup` directory, and deny direct HTTP access to PHP includes such as
 `api/config.php`. The existing schema/migration files on the host are blocked.
 Other subdomains were not changed.
 
-## Database upgrade completed
+## Workspace database upgrade (October 8, 2026)
 
 Before the update, the live database had 39 notes, 3 categories, and 1 user, and
 did not have workspaces. A complete SQL export was saved before changes:
@@ -79,24 +86,56 @@ These packages are for an **existing installation**. They exclude `config.php`,
 SQL exports and migrations, tests, Git files, and `node_modules`.
 
 For an update, first back up the complete current `public_html/notes` directory
-outside `public_html`. Upload the combined ZIP to the private website directory.
-In File Manager, choose Extract, select `public_html` as the destination, enter
-`notes` as the folder name, and enable overwriting existing files. This merges
-only packaged files and preserves production `api/config.php`. Keep previous
-hashed assets for rollback. For a frontend-only update, use the frontend archive.
+outside `public_html`: in File Manager, create `notes_predeploy_backup_YYYYMMDD`
+in the website directory and copy `public_html/notes` into it. Upload the
+combined ZIP to the private website directory under a dated name, such as
+`notes-update-20261029.zip`, so it does not replace an earlier archive. In File
+Manager, choose Extract, select `public_html` as the destination, enter `notes`
+as the folder name, and enable overwriting existing files. This merges only
+packaged files and preserves production `api/config.php`. Keep previous hashed
+assets for rollback. For a frontend-only update, use the frontend archive.
 
 If an update needs a future database migration, export the database first, test
 the migration on an isolated copy, and apply it before uploading code that needs
 the new schema. Never replace production data with a development database.
 
-## Verification
+## October 29, 2026 update
 
-For the next update, include `api/NoteSession.php` with `api/index.php` (the
-packaging script includes it automatically). This adds a rolling 30-day sign-in
-and private session storage outside `public_html`, with no database changes.
-PHP must be able to create the private session directory; `SESSION_SAVE_PATH`
-can override its location. The first login after this update is required once
-per device because the previous shared session storage is no longer used.
+This update deployed commit `8702060` with no database changes. It replaced
+`index.html`, `api/index.php`, and `api/NoteContent.php`, which now preserves
+text highlights. It added `api/NoteSession.php` and the hashed assets
+`index-Bl92wdMb.js` and `index-DPDh9A09.css`. The routing rules, favicons, and
+`api/Database.php` were unchanged.
+
+`api/NoteSession.php` adds a rolling 30-day sign-in. Its session files are in
+`.paper-notes-sessions-<hash>` in the private website directory, which the API
+created on its first request after the update; `SESSION_SAVE_PATH` can override
+the location. Sign-ins from before the update ended, so each device must sign in
+once.
+
+The deployment was checked:
+
+- Locally, a fresh build of the commit matched the committed `dist/` byte for
+  byte. PHP syntax and the 56 content persistence/sanitization checks passed.
+- The backup had the same 36 files and 10,005,233 bytes as the live directory,
+  including `api/config.php`.
+- The uploaded archive matched the local package's SHA-256. After extraction,
+  all 11 packaged files matched the manifest hashes, `api/config.php` matched
+  the backup, and `public_html/notes` held 39 files: the previous 36 plus
+  `api/NoteSession.php` and the two new assets.
+- Over HTTPS, the HTML, both new hashed assets, and both favicons matched the
+  release bytes. `/admin/` served the built frontend, and the app rendered its
+  sign-in page.
+- A request without authentication returned 401, not the 503 the API returns
+  when it cannot write sessions; the session directory has mode 0700. The
+  session cookie is Secure, HttpOnly, and SameSite=Lax, with a 30-day Max-Age.
+- Direct requests for `api/config.php`, `api/NoteSession.php` and the other
+  includes, `api/schema.sql`, `.htaccess`, `_Backup`, and directory listings
+  returned 403. HTTP redirected to HTTPS.
+- Signed-in requests (notes, workspaces, editing) were not tested during the
+  deployment.
+
+## October 8, 2026 update
 
 The deployment was checked over HTTPS:
 
@@ -114,7 +153,12 @@ The deployment was checked over HTTPS:
   and directory listings returned 403. HTTP redirected to HTTPS.
 - PHP syntax and the 44 content persistence/sanitization checks passed locally.
 
-For rollback, restore the previous code from the private backup. The prior API
-does not support workspace changes, so use it only before creating additional
+## Rollback
+
+To roll back code, copy the newest private backup back into `public_html/notes`.
+Rolling back the October 29 update with `notes_predeploy_backup_20261029` needs
+no database change, but devices must sign in again because that API uses PHP's
+shared session storage. The October 8 backup predates workspaces: its API does
+not support workspace changes, so use it only before creating additional
 workspaces. Restoring a database export replaces newer data and requires a
 separate, deliberate recovery decision.
