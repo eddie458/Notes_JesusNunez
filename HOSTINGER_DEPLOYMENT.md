@@ -2,13 +2,15 @@
 
 Live app: https://notes.jesusnunez.top
 
-Commit `8702060` was deployed on October 29, 2026, using Hostinger File Manager.
-It updated the built frontend and PHP API and added rolling 30-day sign-in, with
-no database changes. The previous update, on October 8, 2026, added workspaces
-from the working tree and applied the workspace migration through phpMyAdmin.
-The Tracker deployment document was used as a guide; Paper Notes keeps its
-existing public API directory and private HTTP access rules. Production runs the
-built frontend and PHP 8.3, without Vite or Node.js servers.
+Commit `c921a91` was deployed on November 5, 2026, using Hostinger File Manager.
+It updated only the built frontend, so formatting inside code blocks and quotes
+survives reopening a note. The October 29, 2026 update deployed commit
+`8702060`, which updated the frontend and PHP API and added rolling 30-day
+sign-in. The October 8, 2026 update added workspaces from the working tree and
+applied the workspace migration through phpMyAdmin. The Tracker deployment
+document was used as a guide; Paper Notes keeps its existing public API
+directory and private HTTP access rules. Production runs the built frontend and
+PHP 8.3, without Vite or Node.js servers.
 
 ## Production layout
 
@@ -19,8 +21,11 @@ Website directory/
 │   └── notes/                    Copy of the app before the October 8 update
 ├── notes_predeploy_backup_20261029/
 │   └── notes/                    Copy of the app before the October 29 update
+├── notes_predeploy_backup_20261105/
+│   └── notes/                    Copy of the app before the November 5 update
 ├── notes-update.zip              October 8 package; outside public_html
 ├── notes-update-20261029.zip     October 29 package; outside public_html
+├── notes-frontend-20261105.zip   November 5 package; outside public_html
 └── public_html/
     └── notes/                    notes.jesusnunez.top document root
         ├── index.html
@@ -99,6 +104,44 @@ If an update needs a future database migration, export the database first, test
 the migration on an isolated copy, and apply it before uploading code that needs
 the new schema. Never replace production data with a development database.
 
+## November 5, 2026 update
+
+This frontend-only update deployed commit `c921a91` from `notes-frontend.zip`,
+uploaded as `notes-frontend-20261105.zip`. It replaced `index.html` and added
+the hashed assets `index-B5N99HgL.js` and `index-DPNpAR3A.css`. The API, routing
+rules, favicons, and database were unchanged.
+
+Reopening a note used to read a code block's `<code>` wrapper as inline code,
+which excludes all other formatting, and the next save erased that formatting
+from the database. Code blocks no longer accept the inline code format, and
+inline code now combines with other formatting, including inside quotes. Italic
+text inside a quote now appears upright, because quotes are italic by default.
+Notes saved after reopening lost that formatting permanently and need it
+reapplied; formatting still in the database returns when the note opens.
+
+`index.html` is served without cache rules, so a device can keep the previous
+frontend until it refreshes. Refresh each device after an update. When hashing
+server files through File Manager in a browser, bypass the browser cache, which
+can return the previous copy.
+
+The deployment was checked:
+
+- Locally, the production bundle kept 8 formats in 9 locations, including code
+  blocks and quotes, through two save and reopen cycles on a disposable
+  database. The 67 content and 29 code formatting checks passed.
+- The backup had the same 39 files and 10,827,162 bytes as the live directory,
+  including `api/config.php`.
+- The uploaded archive matched the local package's SHA-256. After extraction,
+  all 11 files in the manifest matched, `api/config.php` matched the backup, and
+  `public_html/notes` held 41 files: the previous 39 plus the two new assets.
+- Over HTTPS, the HTML, both new hashed assets, and both favicons matched the
+  release bytes, and the previous assets remained available. `/admin/` served
+  the built frontend, and a signed-in browser loaded the new bundle.
+- A request without authentication returned 401. Direct requests for
+  `api/config.php`, the other includes, `api/schema.sql`, `.htaccess`,
+  `_Backup`, and directory listings returned 403. HTTP redirected to HTTPS.
+- Editing and saving real notes were not tested during the deployment.
+
 ## October 29, 2026 update
 
 This update deployed commit `8702060` with no database changes. It replaced
@@ -155,10 +198,15 @@ The deployment was checked over HTTPS:
 
 ## Rollback
 
-To roll back code, copy the newest private backup back into `public_html/notes`.
-Rolling back the October 29 update with `notes_predeploy_backup_20261029` needs
-no database change, but devices must sign in again because that API uses PHP's
-shared session storage. The October 8 backup predates workspaces: its API does
-not support workspace changes, so use it only before creating additional
-workspaces. Restoring a database export replaces newer data and requires a
-separate, deliberate recovery decision.
+To roll back the November 5 update, copy `index.html` from
+`notes_predeploy_backup_20261105/notes` back into `public_html/notes`. The
+previous hashed assets are still on the server and the API did not change, but
+the code block formatting bug returns.
+
+For older updates, copy the matching private backup back into
+`public_html/notes`. Rolling back the October 29 update with
+`notes_predeploy_backup_20261029` needs no database change, but devices must
+sign in again because that API uses PHP's shared session storage. The October 8
+backup predates workspaces: its API does not support workspace changes, so use
+it only before creating additional workspaces. Restoring a database export
+replaces newer data and requires a separate, deliberate recovery decision.
