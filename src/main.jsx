@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client'
 import DOMPurify from 'dompurify'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import CodeBlock from '@tiptap/extension-code-block'
 import Color from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react'
 import { adminApi, authApi, categoriesApi, notesApi, workspacesApi } from './api'
 import { AppearanceProvider, ColorPicker, ThemePicker } from './appearance'
+import { FormattableCode, FormattableCodeBlock } from './code-formatting'
 import { AlignedTaskItem, FontSize, NoteImage, isImageSource, prepareNoteImage, readableNoteColor } from './editor-extensions'
 import { CategoryDialog, MoveNoteDialog, WorkspaceDialog, WorkspaceSwitcher } from './workspaces'
 import { useChecklistAlignment } from './useChecklistAlignment'
@@ -92,10 +92,6 @@ const SIZE_OPTIONS = [
   { label: 'Extra large', value: '24px' },
   { label: 'Display', value: '32px' },
 ]
-
-const FormattableCodeBlock = CodeBlock.extend({
-  marks: '_',
-})
 
 function tableRowHeight(value) {
   const height = Number.parseInt(String(value), 10)
@@ -552,7 +548,7 @@ function NoteEditor({ note, workspaceName, categories, onClose, onSave, onDelete
   const [tableColumnWidth, setTableColumnWidth] = useState(160)
   const [tableRowHeight, setTableRowHeight] = useState(56)
   const editor = useEditor({
-    extensions: [StarterKit.configure({ codeBlock: false }), FormattableCodeBlock, TaskList, AlignedTaskItem.configure({ nested: true }), Table.configure({ resizable: true, cellMinWidth: 84 }), TableRow, SizedTableHeader, SizedTableCell, TextStyle, FontSize, Color, FontFamily, Highlight.configure({ multicolor: true }), NoteImage],
+    extensions: [StarterKit.configure({ code: false, codeBlock: false }), FormattableCode, FormattableCodeBlock, TaskList, AlignedTaskItem.configure({ nested: true }), Table.configure({ resizable: true, cellMinWidth: 84 }), TableRow, SizedTableHeader, SizedTableCell, TextStyle, FontSize, Color, FontFamily, Highlight.configure({ multicolor: true }), NoteImage],
     content: note.content,
     editorProps: { attributes: { class: 'editor-prose', 'aria-label': 'Note text', role: 'textbox', 'aria-multiline': 'true' } },
     onUpdate: ({ editor: activeEditor }) => setDraft(value => ({ ...value, content: activeEditor.getHTML() })),

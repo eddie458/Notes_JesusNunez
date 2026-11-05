@@ -204,6 +204,8 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible { outline:3
 :is(.rich-content,.editor-prose) ul[data-type="taskList"] > li > label input { display:block; width:16px; height:16px; margin:0; accent-color:var(--accent); }
 .rich-content ul[data-type="taskList"] input { pointer-events:none; }
 :is(.rich-content,.editor-prose) ul[data-type="taskList"] > li[data-checked="true"] > div { opacity:.5; text-decoration:line-through; }
+/* Quotes are italic, so emphasis inside one turns upright to stay visible. */
+:is(.rich-content,.editor-prose) blockquote em { font-style:normal; }
 :is(.rich-content,.editor-prose) mark { background-color:#fff0a3; color:inherit; border-radius:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
 .rich-content img,.editor-prose img { display:block; max-width:100%; height:auto; margin:16px 0; border-radius:8px; }.note-card-preview img { max-height:170px; object-fit:cover; margin:13px 0 6px; }.editor-prose img.ProseMirror-selectednode { outline:3px solid #729b7c; outline-offset:4px; }.editor-prose hr,.rich-content hr { border:0; border-top:1px solid color-mix(in srgb,var(--note-ink) 20%,transparent); margin:1.5em 0; }
 

@@ -101,10 +101,11 @@ The note editor offers twelve font choices, seven text sizes, preset colors, and
 
 Use **Add image** to choose a PNG, JPG, or WebP file (up to 10 MB) or enter an HTTPS image link. Uploaded images are resized to fit within 1600 pixels, embedded in the note content, and saved in MySQL without a separate upload folder or database migration. Embedded images are limited to 2 MB each and note content to 4 MB. Select an image to drag its bottom-right corner, enter a width (64–1600 pixels), choose a size preset, fit it to the note, or remove it. Arrow keys on the resize handle adjust width by 10 pixels (40 with Shift); Home and End choose the smallest width and the available note width. Proportions are preserved, saved widths survive reopening, and images fit smaller screens. Linked images require their source to remain available.
 
-Run the content persistence and sanitization checks with:
+Run the content persistence, sanitization, and code formatting checks with:
 
 ```bash
 php tests/note-content.php
+node tests/code-formatting.mjs
 ```
 
 `tests/workspaces-api.py` exercises workspace isolation, note movement, validation, CSRF, and account ownership against a disposable local API database. `tests/workspaces-migration.php` checks the upgrade against an empty disposable MariaDB/MySQL database, including preservation of existing notes and edited dates. Their required test configuration is documented at the top of each file.

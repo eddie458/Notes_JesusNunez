@@ -55,6 +55,15 @@ check(str_contains(sanitizeHtml('<p><mark>Default highlight</mark></p>'), '<mark
 $unsafeHighlight = sanitizeHtml('<mark data-color="url(https://example.com/track)" onclick="alert(1)" style="background-color: url(https://example.com/track); background-image: url(https://example.com/track); position: fixed; color: expression(alert(1))">Keep this text</mark>');
 check(!str_contains($unsafeHighlight, 'data-color') && !str_contains($unsafeHighlight, 'style=') && !str_contains($unsafeHighlight, 'onclick'), 'Unsafe highlight attributes and CSS must be stripped.');
 check(str_contains($unsafeHighlight, 'Keep this text'), 'Removing unsafe highlight styles must retain the text.');
+$formatting = '<strong>bold</strong> <em>italic</em> <u>underlined</u> <s>struck</s> <span style="color: rgb(217, 72, 95); font-size: 20px; font-family: Georgia, serif">styled</span> <mark data-color="#fff0a3" style="background-color: rgb(255, 240, 163); color: inherit">highlighted</mark>';
+foreach (['<pre><code>%s</code></pre>', '<blockquote><p>%s</p></blockquote>', '<blockquote><pre><code>%s</code></pre></blockquote>', '<blockquote><ul><li><p>%s</p></li></ul></blockquote>', '<blockquote><p><code>%s</code></p></blockquote>'] as $block) {
+  $wrapped = sprintf($block, $formatting);
+  $saved = sanitizeHtml($wrapped);
+  check(str_contains($saved, $wrapped), 'Formatting inside code and quotes must survive saving: ' . $block);
+  check(str_contains(sanitizeHtml($saved), $wrapped), 'Formatting inside code and quotes must survive repeated saves: ' . $block);
+}
+$indented = "<pre><code>  indented <strong>bold</strong>\n    deeper\n\nafter blank &lt;tag&gt; &amp; more</code></pre>";
+check(str_contains(sanitizeHtml($indented), $indented), 'Code whitespace and escaped characters must survive saving beside formatting.');
 $table = sanitizeHtml('<table><tbody><tr><th colwidth="160" style="height: 80px"><p>Header</p></th><td colspan="2" colwidth="160,0"><p>Cell</p></td></tr></tbody></table>');
 check(str_contains($table, 'colwidth="160,0"') && str_contains($table, 'height: 80px'), 'Table dimensions and partially resized merged cells must survive saving.');
 $link = sanitizeHtml('<a href="https://example.com" target="_blank">Link</a>');
